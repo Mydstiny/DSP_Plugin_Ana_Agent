@@ -1,0 +1,66 @@
+# DSP AI Advisor — LLM Provider Configuration
+# 复制为 config.yaml 并填写你的 API Key
+
+llm:
+  # 默认使用的 provider (必须匹配下方 providers 中的 key)
+  default: deepseek
+
+  providers:
+    # Anthropic Claude
+    claude:
+      provider_type: anthropic
+      api_key: ${ANTHROPIC_API_KEY}
+      model: claude-sonnet-5
+
+    # OpenAI
+    openai:
+      provider_type: openai_compat
+      base_url: https://api.openai.com/v1
+      api_key: ${OPENAI_API_KEY}
+      model: gpt-5
+
+    # DeepSeek
+    deepseek:
+      provider_type: openai_compat
+      base_url: https://api.deepseek.com/v1
+      api_key: ${DEEPSEEK_API_KEY}
+      model: deepseek-v4-pro
+
+    # Ollama (本地)
+    ollama:
+      provider_type: openai_compat
+      base_url: http://localhost:11434/v1
+      api_key: ollama
+      model: qwen3:14b
+
+    # 自定义 Provider 1
+    # custom_1:
+    #   provider_type: openai_compat
+    #   base_url: http://your-server:8080/v1
+    #   api_key: your-key
+    #   model: your-model
+
+    # 自定义 Provider 2
+    # custom_2:
+    #   provider_type: openai_compat
+    #   base_url: https://your-proxy.com/v1
+    #   api_key: ${CUSTOM_API_KEY}
+    #   model: your-model
+
+# WebSocket 配置
+websocket:
+  host: localhost
+  port: 8470
+  reconnect_interval: 1          # 初始重连间隔 (秒)
+  max_reconnect_interval: 30     # 最大重连间隔 (秒)
+  heartbeat_interval: 5          # 心跳间隔 (秒)
+
+# Agent 配置
+agent:
+  phase_timeout: 30              # 单个 Phase 超时 (秒)
+  max_retries: 3                 # LLM 调用最大重试次数
+  enable_streaming: true         # 是否启用流式输出
+
+# Storage
+storage:
+  db_path: data/advisor.db       # SQLite 数据库路径

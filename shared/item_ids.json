@@ -1,0 +1,15 @@
+{
+  "_description": "Dyson Sphere Program item ID mapping. Sourced from DSP game data.",
+  "_version": "0.1.0",
+  "_note": "This is a placeholder. Full item list to be extracted from LDB.items at runtime.",
+  "items": {
+    "1001": {"name": "铁矿", "name_en": "Iron Ore", "type": "raw"},
+    "1002": {"name": "铜矿", "name_en": "Copper Ore", "type": "raw"},
+    "1003": {"name": "石矿", "name_en": "Stone", "type": "raw"},
+    "1004": {"name": "煤矿", "name_en": "Coal", "type": "raw"},
+    "1101": {"name": "铁块", "name_en": "Iron Ingot", "type": "smelted"},
+    "1102": {"name": "铜块", "name_en": "Copper Ingot", "type": "smelted"},
+    "1103": {"name": "磁铁", "name_en": "Magnet", "type": "smelted"},
+    "1104": {"name": "石材", "name_en": "Stone Brick", "type": "smelted"}
+  }
+}
