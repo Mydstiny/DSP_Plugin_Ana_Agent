@@ -2,6 +2,7 @@ using System;
 using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
+using UnityEngine;
 
 namespace DSP_AI_Advisor
 {
@@ -27,6 +28,11 @@ namespace DSP_AI_Advisor
 
                 // 启动 WebSocket Server
                 WebSocket.WsServer.Instance.Start();
+
+                // 创建 UI Manager GameObject
+                var uiGo = new GameObject("DSP_AI_Advisor_UIManager");
+                DontDestroyOnLoad(uiGo);
+                uiGo.AddComponent<UI.UIManager>();
 
                 Log.LogInfo("DSP AI Advisor loaded.");
             }

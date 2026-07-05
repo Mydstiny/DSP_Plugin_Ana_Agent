@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.WebSockets;
@@ -21,6 +22,7 @@ namespace DSP_AI_Advisor.WebSocket
 
         private readonly object _clientLock = new();
         private readonly List<System.Net.WebSockets.WebSocket> _clients = new();
+        private readonly ConcurrentQueue<MessageEnvelope> _incomingQueue = new();
         private HttpListener _listener;
         private CancellationTokenSource _cts;
         private Task _listenTask;
@@ -146,6 +148,23 @@ namespace DSP_AI_Advisor.WebSocket
         }
 
         /// <summary>
+        /// 向已连接 Companion 发送命令消息.
+        /// </summary>
+        public void SendCommand(string type, object payload = null)
+        {
+            var json = MessageCodec.Encode("command", type, payload ?? new { });
+            Broadcast(json);
+        }
+
+        /// <summary>
+        /// 消费一条入站消息 (非阻塞). UIManager.Update() 中调用.
+        /// </summary>
+        public bool TryDequeueMessage(out MessageEnvelope envelope)
+        {
+            return _incomingQueue.TryDequeue(out envelope);
+        }
+
+        /// <summary>
         /// 主监听循环 — 接受连接, 升级到 WebSocket, 加入 client 列表.
         /// </summary>
         private async Task ListenLoop(CancellationToken ct)
@@ -194,16 +213,37 @@ namespace DSP_AI_Advisor.WebSocket
                 lock (_clientLock) { _clients.Add(ws); }
 
                 Plugin.Log.LogInfo($"[WsServer] Client connected. Total: {_clients.Count}");
+                MessageRouter.NotifyConnection(true);
 
-                // 保持连接直到 client 断开
-                var buffer = new byte[4096];
+                // 保持连接直到 client 断开，同时解析入站消息
+                var buffer = new byte[16384];
+                var messageBuffer = new StringBuilder();
                 while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
                 {
                     try
                     {
-                        var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                        var result = await ws.ReceiveAsync(
+                            new ArraySegment<byte>(buffer), ct);
                         if (result.MessageType == WebSocketMessageType.Close)
                             break;
+
+                        if (result.MessageType == WebSocketMessageType.Text)
+                        {
+                            messageBuffer.Append(
+                                Encoding.UTF8.GetString(buffer, 0, result.Count));
+
+                            if (result.EndOfMessage)
+                            {
+                                var raw = messageBuffer.ToString();
+                                messageBuffer.Clear();
+
+                                var envelope = MessageCodec.Decode(raw);
+                                if (envelope != null)
+                                {
+                                    _incomingQueue.Enqueue(envelope);
+                                }
+                            }
+                        }
                     }
                     catch (OperationCanceledException)
                     {
@@ -227,6 +267,8 @@ namespace DSP_AI_Advisor.WebSocket
                 int remaining;
                 lock (_clientLock) { remaining = _clients.Count; }
                 Plugin.Log.LogInfo($"[WsServer] Client disconnected. Total: {remaining}");
+                if (remaining == 0)
+                    MessageRouter.NotifyConnection(false);
             }
         }
 
