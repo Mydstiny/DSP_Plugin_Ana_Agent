@@ -18,10 +18,41 @@ from .task_manager.manager import TaskManager
 
 logger = logging.getLogger(__name__)
 
-# Global references for WebSocket callbacks
 _agent: OptimizationAgent | None = None
 _task_manager: TaskManager | None = None
 _ws_client: DspWsClient | None = None
+
+
+async def _handle_alert(payload: dict) -> None:
+    """Handle real-time alert from the DSP plugin."""
+    alert_type = payload.get("type", "unknown")
+    if alert_type == "power_critical":
+        logger.warning(
+            "⚡ ALERT: %s power at %d%% (%.0fMW/%.0fMW)",
+            payload.get("planet_name", "?"),
+            int(payload.get("ratio", 0) * 100),
+            payload.get("generation", 0),
+            payload.get("consumption", 0),
+        )
+    elif alert_type == "resource_depleted":
+        logger.warning(
+            "⛏ ALERT: %s vein depleted on %s",
+            payload.get("item_name", "?"),
+            payload.get("planet_name", "?"),
+        )
+    elif alert_type == "station_full":
+        logger.warning(
+            "📦 ALERT: %s station full (%s at %d%%)",
+            payload.get("station_name", "?"),
+            payload.get("item_name", "?"),
+            int(payload.get("capacity_ratio", 0) * 100),
+        )
+    elif alert_type == "production_stalled":
+        logger.warning(
+            "🔧 ALERT: Production stalled on %s (reason: %s)",
+            payload.get("planet_name", "?"),
+            payload.get("reason", "?"),
+        )
 
 
 async def _on_snapshot(snapshot: SnapshotData) -> None:
@@ -39,25 +70,49 @@ async def _on_snapshot(snapshot: SnapshotData) -> None:
             )
 
 
-async def _on_galaxy_scan_result(payload: dict) -> None:
-    """Handle a galaxy scan result from the DSP plugin."""
-    global _agent, _task_manager, _ws_client
+async def _on_message(envelope: MessageEnvelope) -> None:
+    """Handle all incoming WebSocket messages."""
+    global _agent, _task_manager
 
-    if _agent is None or _task_manager is None:
-        logger.warning("Agent or TaskManager not initialized — ignoring scan result")
+    # Alert channel
+    if envelope.channel == "alert" and envelope.payload:
+        await _handle_alert(envelope.payload)
         return
 
-    logger.info("Galaxy scan received, starting agent analysis...")
+    # Galaxy scan result
+    if (
+        envelope.channel == "snapshot"
+        and envelope.type == "galaxy_scan_result"
+        and envelope.payload
+    ):
+        await _on_galaxy_scan_result(envelope.payload)
+        return
+
+    # Periodic snapshot
+    if envelope.channel == "snapshot" and envelope.type == "periodic_snapshot":
+        if envelope.payload:
+            snapshot = SnapshotData(**envelope.payload)
+            await _on_snapshot(snapshot)
+        return
+
+
+async def _on_galaxy_scan_result(payload: dict) -> None:
+    """Handle a galaxy scan result from the DSP plugin."""
+    global _agent, _task_manager
+
+    if _agent is None or _task_manager is None:
+        logger.warning("Agent/TaskManager not initialized")
+        return
+
     logger.info(
-        "  Planets: %d, Stations: %d, Routes: %d",
+        "Galaxy scan received: %d planets, %d stations, %d routes",
         len(payload.get("planets", [])),
         len(payload.get("stations", [])),
         len(payload.get("routes", [])),
     )
 
-    # Run agent analysis
     async def _progress(phase: str, tool: str, pct: float) -> None:
-        logger.info("  [%.0f%%] Phase %s: %s", pct * 100, phase, tool)
+        logger.info("  [%.0f%%] %s: %s", pct * 100, phase, tool)
 
     try:
         result = await _agent.analyze(payload, progress_callback=_progress)
@@ -69,56 +124,34 @@ async def _on_galaxy_scan_result(payload: dict) -> None:
         if result.tasks:
             added = _task_manager.merge_and_dedup(result.tasks)
             logger.info(
-                "Analysis complete: %d new tasks added, %d active total",
+                "Analysis: %d new tasks, %d active total (rounds=%d)",
                 len(added),
                 _task_manager.active_count,
+                result.total_rounds,
             )
-
-            # Print task list
-            active = _task_manager.get_active_tasks(limit=20)
-            for i, task in enumerate(active, 1):
+            for i, task in enumerate(_task_manager.get_active_tasks(limit=20), 1):
                 logger.info(
                     "  %d. [%s] %s — %s",
-                    i,
-                    task.priority.value.upper(),
+                    i, task.priority.value.upper(),
                     task.title,
-                    task.planet or "全局",
+                    task.planet or "global",
                 )
         else:
-            logger.warning("Agent produced no tasks. Raw summary: %.200s", result.summary)
+            logger.warning("No tasks produced. Summary: %.200s", result.summary)
 
     except Exception:
         logger.exception("Agent analysis failed")
 
 
-async def _dispatch_message(envelope: MessageEnvelope) -> None:
-    """Dispatch WebSocket messages to handlers."""
-    if (
-        envelope.channel == "snapshot"
-        and envelope.type == "galaxy_scan_result"
-        and envelope.payload
-    ):
-        await _on_galaxy_scan_result(envelope.payload)
-
-    elif envelope.channel == "snapshot" and envelope.type == "periodic_snapshot":
-        if envelope.payload:
-            snapshot = SnapshotData(**envelope.payload)
-            await _on_snapshot(snapshot)
-
-
 def _load_config(config_path: str | None = None) -> LLMSettings:
     """Load LLM configuration from config.yaml."""
-    if config_path:
-        path = Path(config_path)
-    else:
-        path = Path("config.yaml")
+    path = Path(config_path) if config_path else Path("config.yaml")
 
     if not path.exists():
         logger.warning(
             "config.yaml not found at %s. Copy config.yaml.example and edit it.",
             path.absolute(),
         )
-        # Return empty config — will fail on provider creation
         return LLMSettings(default="claude", providers={})
 
     logger.info("Loading config from %s", path.absolute())
@@ -130,16 +163,21 @@ async def main_async(config_path: str | None = None) -> None:
     global _agent, _task_manager, _ws_client
 
     version = __import__("dsp_ai_advisor").__version__
-    logger.info("DSP AI Advisor Companion v%s starting...", version)
+    logger.info("DSP AI Advisor Companion v%s", version)
+    logger.info("-" * 50)
 
     # Load config
     config = _load_config(config_path)
     if not config.providers:
-        logger.error("No LLM providers configured. Exiting.")
+        logger.error("No LLM providers configured. Copy config.yaml.example → config.yaml")
         return
 
     provider = config.create_provider()
-    logger.info("LLM provider: %s (model=%s)", config.default, config.providers[config.default].model)
+    logger.info(
+        "Provider: %s (model=%s)",
+        config.default,
+        config.providers[config.default].model,
+    )
 
     # Initialize components
     _agent = OptimizationAgent(provider, AgentConfig())
@@ -147,12 +185,12 @@ async def main_async(config_path: str | None = None) -> None:
 
     # Connect to DSP plugin
     _ws_client = DspWsClient(host="localhost", port=8470)
-    # Register the dispatch function to handle all message types
-    _ws_client._dispatch = _dispatch_message  # type: ignore[assignment]
+    _ws_client.on_message(_on_message)
+    _ws_client.on_snapshot(_on_snapshot)
 
     await _ws_client.connect()
 
-    # Keep running until interrupted
+    # Keep running
     stop = asyncio.Event()
 
     def _signal_handler() -> None:
@@ -163,7 +201,8 @@ async def main_async(config_path: str | None = None) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
 
-    logger.info("Ready. Waiting for DSP game to connect...")
+    logger.info("Ready. Press F8 in-game to open control panel.")
+    logger.info("-" * 50)
     await stop.wait()
 
     await _ws_client.disconnect()

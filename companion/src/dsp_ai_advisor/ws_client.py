@@ -14,8 +14,9 @@ from .models import MessageEnvelope, SnapshotData
 
 logger = logging.getLogger(__name__)
 
-# Callback type: async function receiving SnapshotData
+# Callback types
 SnapshotCallback = Callable[[SnapshotData], Awaitable[None]]
+MessageCallback = Callable[[MessageEnvelope], Awaitable[None]]
 
 
 class DspWsClient:
@@ -33,6 +34,7 @@ class DspWsClient:
 
         # Registered callbacks
         self._snapshot_callbacks: list[SnapshotCallback] = []
+        self._message_callbacks: list[MessageCallback] = []
 
     @property
     def is_connected(self) -> bool:
@@ -47,6 +49,11 @@ class DspWsClient:
     def on_snapshot(self, callback: SnapshotCallback) -> SnapshotCallback:
         """Register a callback for snapshot messages. Can be used as decorator."""
         self._snapshot_callbacks.append(callback)
+        return callback
+
+    def on_message(self, callback: MessageCallback) -> MessageCallback:
+        """Register a callback for ALL incoming messages. Fires before default dispatch."""
+        self._message_callbacks.append(callback)
         return callback
 
     async def connect(self) -> None:
@@ -124,6 +131,14 @@ class DspWsClient:
 
     async def _dispatch(self, envelope: MessageEnvelope) -> None:
         """Route message to the appropriate handler based on channel/type."""
+        # General message callbacks first
+        for cb in self._message_callbacks:
+            try:
+                await cb(envelope)
+            except Exception:
+                logger.exception("Error in message callback")
+
+        # Default dispatch
         if envelope.channel == "snapshot" and envelope.type == "periodic_snapshot":
             if envelope.payload:
                 snapshot = SnapshotData(**envelope.payload)
