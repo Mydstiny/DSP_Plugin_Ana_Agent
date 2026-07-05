@@ -137,6 +137,15 @@ namespace DSP_AI_Advisor.WebSocket
         }
 
         /// <summary>
+        /// 广播 GalaxyScanData (全星系扫描结果).
+        /// </summary>
+        public void BroadcastGalaxyScan(DataCollectors.GalaxyScanData data)
+        {
+            var json = MessageCodec.EncodeGalaxyScan(data);
+            Broadcast(json);
+        }
+
+        /// <summary>
         /// 主监听循环 — 接受连接, 升级到 WebSocket, 加入 client 列表.
         /// </summary>
         private async Task ListenLoop(CancellationToken ct)

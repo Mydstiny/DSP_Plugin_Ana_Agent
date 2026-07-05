@@ -34,6 +34,14 @@ namespace DSP_AI_Advisor.WebSocket
         }
 
         /// <summary>
+        /// 便捷方法 — 编码 GalaxyScanData 为 snapshot channel 消息.
+        /// </summary>
+        public static string EncodeGalaxyScan(DataCollectors.GalaxyScanData data)
+        {
+            return Encode("snapshot", "galaxy_scan_result", data);
+        }
+
+        /// <summary>
         /// 解码消息信封, 提取 channel/type/payload.
         /// 返回 null 表示解析失败.
         /// </summary>
