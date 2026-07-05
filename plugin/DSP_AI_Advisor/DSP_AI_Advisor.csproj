@@ -9,6 +9,7 @@
     <RootNamespace>DSP_AI_Advisor</RootNamespace>
     <AssemblyName>DSP_AI_Advisor</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <LangVersion>9.0</LangVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
   </PropertyGroup>

@@ -41,26 +41,42 @@ namespace DSP_AI_Advisor.DataCollectors
 
         /// <summary>
         /// 定义 Patch 目标 — 运行时查找 FactoryProductionStat.GameTick.
-        /// 使用 AccessTools.TypeByName 而非 typeof() 因为 Assembly-CSharp 是 Private=False 引用.
+        /// 指定完整参数类型以避免多重重载歧义.
+        /// 原始签名: GameTick(GameStatData, long, int[], int[], long[], long[])
         /// </summary>
         public static System.Reflection.MethodBase TargetMethod()
         {
-            return AccessTools.Method(
-                AccessTools.TypeByName("FactoryProductionStat"),
-                "GameTick");
+            var type = AccessTools.TypeByName("FactoryProductionStat");
+            return AccessTools.Method(type, "GameTick", new Type[]
+            {
+                AccessTools.TypeByName("GameStatData"),
+                typeof(long),
+                typeof(int[]),
+                typeof(int[]),
+                typeof(long[]),
+                typeof(long[])
+            });
         }
 
         /// <summary>
         /// Harmony Prefix — 在原始 GameTick 之前执行.
-        /// 匹配原始方法签名: GameTick(GameStatData, long, int[], int[], long[], long[])
-        /// 只需前 4 个参数 (后 2 个 serveRegister 暂不使用).
+        ///
+        /// Harmony 参数匹配规则:
+        ///   __instance → 特殊名, 匹配 this (FactoryProductionStat 实例)
+        ///   其余参数按位置匹配原始方法参数 (1→gameStatData, 2→time, 3→productRegister, ...)
+        ///
+        /// 必须声明全部 6 个参数, 哪怕后 2 个暂不使用,
+        /// 否则 Harmony 会把参数匹配到错误的位置导致 Patch 失败.
         /// </summary>
         [HarmonyPrefix]
         public static void Prefix(
             object __instance,
-            long time,
-            int[] productRegister,
-            int[] consumeRegister)
+            object gameStatData,       // 1st: GameStatData — 用 object 避免直接引用 DSP 内部类型
+            long time,                 // 2nd: time (game tick)
+            int[] productRegister,     // 3rd: productRegister[i] = item i 本 tick 产量
+            int[] consumeRegister,     // 4th: consumeRegister[i] = item i 本 tick 消耗量
+            long[] productServedRegister,  // 5th: 暂不使用, 仅占位保证参数位置正确
+            long[] consumeServedRegister)  // 6th: 暂不使用, 仅占位保证参数位置正确
         {
             try
             {

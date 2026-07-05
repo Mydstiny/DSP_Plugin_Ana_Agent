@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
@@ -19,7 +19,8 @@ namespace DSP_AI_Advisor.WebSocket
 
         public static WsServer Instance => _instance.Value;
 
-        private readonly ConcurrentBag<System.Net.WebSockets.WebSocket> _clients = new();
+        private readonly object _clientLock = new();
+        private readonly List<System.Net.WebSockets.WebSocket> _clients = new();
         private HttpListener _listener;
         private CancellationTokenSource _cts;
         private Task _listenTask;
@@ -73,7 +74,12 @@ namespace DSP_AI_Advisor.WebSocket
                 _cts?.Cancel();
 
                 // 关闭所有 client 连接
-                foreach (var client in _clients)
+                List<System.Net.WebSockets.WebSocket> snapshot;
+                lock (_clientLock)
+                {
+                    snapshot = new List<System.Net.WebSockets.WebSocket>(_clients);
+                }
+                foreach (var client in snapshot)
                 {
                     try { client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Server shutting down", CancellationToken.None).Wait(1000); }
                     catch { /* best effort */ }
@@ -96,12 +102,17 @@ namespace DSP_AI_Advisor.WebSocket
         /// </summary>
         public void Broadcast(string message)
         {
-            if (_clients.IsEmpty) return;
+            List<System.Net.WebSockets.WebSocket> snapshot;
+            lock (_clientLock)
+            {
+                if (_clients.Count == 0) return;
+                snapshot = new List<System.Net.WebSockets.WebSocket>(_clients);
+            }
 
             var buffer = Encoding.UTF8.GetBytes(message);
             var segment = new ArraySegment<byte>(buffer);
 
-            foreach (var client in _clients)
+            foreach (var client in snapshot)
             {
                 if (client.State != WebSocketState.Open) continue;
                 try
@@ -171,7 +182,7 @@ namespace DSP_AI_Advisor.WebSocket
             {
                 var wsContext = await context.AcceptWebSocketAsync(null);
                 ws = wsContext.WebSocket;
-                _clients.Add(ws);
+                lock (_clientLock) { _clients.Add(ws); }
 
                 Plugin.Log.LogInfo($"[WsServer] Client connected. Total: {_clients.Count}");
 
@@ -204,22 +215,18 @@ namespace DSP_AI_Advisor.WebSocket
                 }
                 // 从 client 列表中移除 — ConcurrentBag 不支持 Remove, 重建
                 RemoveClient(ws);
-                Plugin.Log.LogInfo($"[WsServer] Client disconnected. Total: {_clients.Count}");
+                int remaining;
+                lock (_clientLock) { remaining = _clients.Count; }
+                Plugin.Log.LogInfo($"[WsServer] Client disconnected. Total: {remaining}");
             }
         }
 
         private void RemoveClient(System.Net.WebSockets.WebSocket target)
         {
-            var remaining = new ConcurrentBag<System.Net.WebSockets.WebSocket>();
-            foreach (var client in _clients)
+            lock (_clientLock)
             {
-                if (client != target)
-                    remaining.Add(client);
+                _clients.Remove(target);
             }
-            // 替换 — ConcurrentBag 不支持原子替换, 但 Accept 已序列化, 安全
-            while (_clients.TryTake(out _)) { }
-            foreach (var client in remaining)
-                _clients.Add(client);
         }
     }
 }

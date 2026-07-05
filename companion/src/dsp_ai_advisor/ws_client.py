@@ -37,7 +37,12 @@ class DspWsClient:
     @property
     def is_connected(self) -> bool:
         """Whether the WebSocket connection is currently open."""
-        return self._connection is not None and self._connection.state.name == "OPEN"
+        if self._connection is None:
+            return False
+        try:
+            return self._connection.state.name == "OPEN"
+        except Exception:
+            return False
 
     def on_snapshot(self, callback: SnapshotCallback) -> SnapshotCallback:
         """Register a callback for snapshot messages. Can be used as decorator."""
